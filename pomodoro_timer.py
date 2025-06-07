@@ -151,6 +151,19 @@ class PomodoroTimer:
         )
         break_label.pack(pady=(60, 20))  # Space above for aesthetics
 
+        # --- Wellness Message Section ---
+        # Add a motivational wellness message below the timer
+        wellness_msg = tk.Label(
+            self.break_window,
+            text="Relax! Look away from the screen, stretch your body, and rest your eyes.",
+            font=("Arial", 18, "italic"),
+            bg="#222",
+            fg="#FFD700",  # Gold color for emphasis
+            wraplength=700,
+            justify="center"
+        )
+        wellness_msg.pack(pady=(0, 30))
+
         # --- Password Entry Section ---
         # Frame to hold password entry and label
         password_frame = tk.Frame(self.break_window, bg="#222")
@@ -203,21 +216,37 @@ class PomodoroTimer:
             break_label.config(text=f"Break time: {mins:02d}:{secs:02d}")
             self.break_window.update()
             time.sleep(1)
-        # If break ended naturally (not by password), clean up and proceed
+
+        # --- Resume Working Button Section ---
         if self.break_window.winfo_exists():
-            self.break_window.destroy()
-            self.is_break = False
-            self.current_session += 1
-            if self.current_session <= self.total_sessions:
-                self.start_work_session()
-            else:
-                # Play a long beep to indicate all sessions are complete
-                try:
-                    import winsound
-                    winsound.Beep(1200, 700)  # 1200 Hz for 700 ms
-                except Exception:
-                    pass
-                print("Pomodoro sequence complete!")
+            # After break ends, show the Resume Working button
+            resume_btn = tk.Button(
+                self.break_window,
+                text="Resume Working",
+                font=("Arial", 20, "bold"),
+                bg="#4CAF50",
+                fg="white",
+                activebackground="#357a38",
+                activeforeground="white",
+                command=lambda: on_resume_click()
+            )
+            resume_btn.pack(pady=40)
+
+            # Function to handle Resume Working button click
+            def on_resume_click():
+                self.break_window.destroy()
+                self.is_break = False
+                self.current_session += 1
+                if self.current_session <= self.total_sessions:
+                    self.start_work_session()
+                else:
+                    # Play a long beep to indicate all sessions are complete
+                    try:
+                        import winsound
+                        winsound.Beep(1200, 700)  # 1200 Hz for 700 ms
+                    except Exception:
+                        pass
+                    print("Pomodoro sequence complete!")
 
 if __name__ == "__main__":
     root = tk.Tk()
