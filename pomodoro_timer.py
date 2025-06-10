@@ -3,12 +3,248 @@
 Pomodoro Timer
 
 A customizable Pomodoro timer that helps you stay focused and productive.
+Displays break windows on all virtual desktops when a break starts.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
 import time
 import threading
 import sys
+import ctypes
+from ctypes import wintypes
+import win32gui
+import win32con
+import win32api
+import pythoncom
+import pywintypes
+import win32process
+import os
+
+class BreakManager:
+    """Manages break windows across all virtual desktops"""
+    
+    def __init__(self, break_time, is_long_break, on_break_end):
+        self.break_time = break_time
+        self.is_long_break = is_long_break
+        self.on_break_end = on_break_end
+        self.windows = []
+        self.running = True
+        self.end_time = time.time() + break_time
+        self.password = "iamdesparatetowork"
+        self.create_windows()
+        self.update_timer()
+    
+    def create_windows(self):
+        """Create break windows that should appear on all desktops"""
+        # Create a single window that we'll try to make visible on all desktops
+        self.create_break_window()
+    
+    def create_break_window(self):
+        """Create a break window that should appear on all desktops"""
+        try:
+            # Create a new Tkinter window
+            window = tk.Tk()
+            
+            # Set window properties
+            window.title("Break Time!")
+            window.configure(bg='#222')
+            
+            # Add content first (we'll make it fullscreen after)
+            break_label = tk.Label(
+                window,
+                text="Take a break!",
+                font=("Arial", 48, "bold"),
+                bg="#222",
+                fg="white"
+            )
+            break_label.pack(pady=(60, 20))
+            
+            # Add timer label
+            time_left = max(0, int(self.end_time - time.time()))
+            mins, secs = divmod(time_left, 60)
+            timer_label = tk.Label(
+                window,
+                text=f"Break time: {mins:02d}:{secs:02d}",
+                font=("Arial", 36),
+                bg="#222",
+                fg="white"
+            )
+            timer_label.pack(pady=10)
+            window.timer_label = timer_label
+            
+            # Add wellness message
+            wellness_msg = tk.Label(
+                window,
+                text="Relax! Look away from the screen, stretch your body, and rest your eyes.",
+                font=("Arial", 18, "italic"),
+                bg="#222",
+                fg="#FFD700",
+                wraplength=700,
+                justify="center"
+            )
+            wellness_msg.pack(pady=(0, 30))
+            
+            # Only add password entry to the first window
+            if not self.windows:
+                password_frame = tk.Frame(window, bg="#222")
+                password_frame.pack(pady=(10, 40))
+                
+                password_label = tk.Label(
+                    password_frame,
+                    text="Enter password to end break early:",
+                    font=("Arial", 16),
+                    bg="#222",
+                    fg="white"
+                )
+                password_label.pack(side=tk.LEFT, padx=(0, 10))
+                
+                password_entry = tk.Entry(password_frame, show="*", font=("Arial", 16), width=20)
+                password_entry.pack(side=tk.LEFT)
+                password_entry.focus_set()
+                
+                def try_end_break(event=None):
+                    if password_entry.get() == self.password:
+                        self.end_break()
+                    else:
+                        password_entry.delete(0, tk.END)
+                        password_label.config(text="Incorrect password. Try again:", fg="red")
+                        window.after(1000, lambda: password_label.config(
+                            text="Enter password to end break early:", 
+                            fg="white"
+                        ))
+                
+                submit_btn = tk.Button(
+                    password_frame, 
+                    text="Submit", 
+                    font=("Arial", 14), 
+                    command=try_end_break
+                )
+                submit_btn.pack(side=tk.LEFT, padx=(10, 0))
+                password_entry.bind('<Return>', try_end_break)
+                
+                # Add resume button that will appear when break time is up
+                resume_btn = tk.Button(
+                    window,
+                    text="Resume Working",
+                    font=("Arial", 20, "bold"),
+                    bg="#4CAF50",
+                    fg="white",
+                    activebackground="#357a38",
+                    activeforeground="white",
+                    command=self.end_break
+                )
+                resume_btn.pack(pady=40)
+                window.resume_btn = resume_btn
+                resume_btn.pack_forget()
+            
+            # Now make the window fullscreen and topmost
+            window.attributes('-fullscreen', True)
+            window.attributes('-topmost', True)
+            window.overrideredirect(True)  # Remove window decorations
+            
+            # Get window handle for Windows-specific operations
+            hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            
+            # Try to make window visible on all virtual desktops
+            try:
+                # This is the GUID for the virtual desktop manager
+                IID_IVirtualDesktopManager = "{a5cd92ff-29be-454c-8d04-d82879fb3f1b}"
+                CLSID_VirtualDesktopManager = "{aa509086-5ca9-4c25-8f95-589d3c07b48a}"
+                
+                # Try to get the virtual desktop manager
+                shell32 = ctypes.windll.shell32
+                shell32.CoInitialize(0)
+                
+                # Try to make the window visible on all desktops
+                try:
+                    # This is a best-effort approach
+                    ctypes.windll.user32.SetWindowLongW(
+                        hwnd,
+                        -20,  # GWL_EXSTYLE
+                        0x00080000  # WS_EX_APPWINDOW
+                    )
+                except Exception as e:
+                    print(f"Could not set window style: {e}")
+                
+                # Make sure window is visible
+                ctypes.windll.user32.ShowWindow(hwnd, 1)  # SW_SHOWNORMAL
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                
+            except Exception as e:
+                print(f"Error setting window properties: {e}")
+            
+            # Store the window
+            self.windows.append(window)
+            
+            # Handle window close
+            def on_closing():
+                self.end_break()
+                
+            window.protocol("WM_DELETE_WINDOW", on_closing)
+            
+            return window
+            
+        except Exception as e:
+            print(f"Error creating break window: {e}")
+            return None
+    
+    def update_timer(self):
+        """Update the timer on all break windows"""
+        if not self.running:
+            return
+            
+        time_left = max(0, int(self.end_time - time.time()))
+        
+        if time_left <= 0:
+            self.end_break()
+            return
+            
+        mins, secs = divmod(time_left, 60)
+        time_str = f"{mins:02d}:{secs:02d}"
+        
+        windows_to_remove = []
+        for window in self.windows:  # Don't use a slice to avoid modifying while iterating
+            try:
+                if window.winfo_exists():
+                    if hasattr(window, 'timer_label'):
+                        window.timer_label.config(text=f"Break time: {time_str}")
+                        window.update()
+                else:
+                    windows_to_remove.append(window)
+            except Exception as e:
+                print(f"Error updating window: {e}")
+                windows_to_remove.append(window)
+        
+        # Remove any dead windows
+        for window in windows_to_remove:
+            if window in self.windows:
+                self.windows.remove(window)
+        
+        # Schedule the next update if we still have windows
+        if self.running and self.windows:
+            self.windows[0].after(200, self.update_timer)
+    
+    def end_break(self):
+        """End the break and close all windows"""
+        if not self.running:
+            return
+            
+        self.running = False
+        
+        # Close all windows
+        for window in self.windows[:]:
+            try:
+                if window.winfo_exists():
+                    window.destroy()
+            except:
+                pass
+        
+        self.windows = []
+        
+        # Notify the main application
+        if self.on_break_end:
+            self.on_break_end()
+
 
 class PomodoroTimer:
     def __init__(self, root):
@@ -116,9 +352,25 @@ class PomodoroTimer:
         print("\nWork session complete!")
         self.start_break()
 
+    def on_break_end(self):
+        """Callback when break ends, either by timeout or user action"""
+        self.is_break = False
+        self.break_manager = None
+        self.current_session += 1
+        if self.current_session <= self.total_sessions:
+            self.start_work_session()
+        else:
+            # Play a long beep to indicate all sessions are complete
+            try:
+                import winsound
+                winsound.Beep(1200, 700)  # 1200 Hz for 700 ms
+            except Exception:
+                pass
+            print("Pomodoro sequence complete!")
+
     def start_break(self):
         """
-        Start a break session. Displays a fullscreen overlay with the break time and waits for the break to complete.
+        Start a break session. Creates break windows on all virtual desktops.
         Plays a double beep at the start.
         """
         # Play a double beep to indicate break start
@@ -129,124 +381,18 @@ class PomodoroTimer:
             winsound.Beep(800, 200)  # 800 Hz for 200 ms
         except Exception:
             pass  # Ignore if sound fails
-        if self.current_session % 4 == 0:
-            break_time = self.long_break_min * 60
-        else:
-            break_time = self.short_break_min * 60
+            
+        # Calculate break time
+        is_long_break = (self.current_session % 4 == 0)
+        break_time = (self.long_break_min if is_long_break else self.short_break_min) * 60
+        
+        # Create break manager to handle windows on all desktops
         self.is_break = True
-        self.break_window = tk.Tk()
-        self.break_window.title("Break Time!")
-        # Make the break overlay truly fullscreen
-        self.break_window.attributes('-fullscreen', True)
-        # Optionally, keep it always on top
-        self.break_window.attributes('-topmost', True)
-        # Set background color for better visibility
-        self.break_window.configure(bg="#222")
-        break_label = tk.Label(
-            self.break_window,
-            text="Take a break!",
-            font=("Arial", 48, "bold"),
-            bg="#222",
-            fg="white"
+        self.break_manager = BreakManager(
+            break_time=break_time,
+            is_long_break=is_long_break,
+            on_break_end=self.on_break_end
         )
-        break_label.pack(pady=(60, 20))  # Space above for aesthetics
-
-        # --- Wellness Message Section ---
-        # Add a motivational wellness message below the timer
-        wellness_msg = tk.Label(
-            self.break_window,
-            text="Relax! Look away from the screen, stretch your body, and rest your eyes.",
-            font=("Arial", 18, "italic"),
-            bg="#222",
-            fg="#FFD700",  # Gold color for emphasis
-            wraplength=700,
-            justify="center"
-        )
-        wellness_msg.pack(pady=(0, 30))
-
-        # --- Password Entry Section ---
-        # Frame to hold password entry and label
-        password_frame = tk.Frame(self.break_window, bg="#222")
-        password_frame.pack(pady=(10, 40))
-
-        # Label for password prompt
-        password_label = tk.Label(
-            password_frame,
-            text="Enter password to end break early:",
-            font=("Arial", 16),
-            bg="#222",
-            fg="white"
-        )
-        password_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        # Entry field for password
-        password_entry = tk.Entry(password_frame, show="*", font=("Arial", 16), width=20)
-        password_entry.pack(side=tk.LEFT)
-        password_entry.focus_set()
-
-        # Function to check password and end break if correct
-        def try_end_break(event=None):
-            if password_entry.get() == "iamdesparatetowork":
-                # If password is correct, destroy the break window and end break
-                self.break_window.destroy()
-                self.is_break = False
-                self.running = True  # Ensure running is True for next session
-                self.current_session += 1
-                if self.current_session <= self.total_sessions:
-                    self.start_work_session()
-                else:
-                    print("Pomodoro sequence complete!")
-            else:
-                # If password is wrong, show error and clear entry
-                password_entry.delete(0, tk.END)
-                password_label.config(text="Incorrect password. Try again:", fg="red")
-                self.break_window.after(1000, lambda: password_label.config(text="Enter password to end break early:", fg="white"))
-
-        # Button to submit password
-        submit_btn = tk.Button(password_frame, text="Submit", font=("Arial", 14), command=try_end_break)
-        submit_btn.pack(side=tk.LEFT, padx=(10, 0))
-        # Bind Enter key to password check
-        password_entry.bind('<Return>', try_end_break)
-
-        # --- Timer Update Section ---
-        for i in range(break_time, 0, -1):
-            if not self.running or not self.break_window.winfo_exists():
-                break
-            mins, secs = divmod(i, 60)
-            break_label.config(text=f"Break time: {mins:02d}:{secs:02d}")
-            self.break_window.update()
-            time.sleep(1)
-
-        # --- Resume Working Button Section ---
-        if self.break_window.winfo_exists():
-            # After break ends, show the Resume Working button
-            resume_btn = tk.Button(
-                self.break_window,
-                text="Resume Working",
-                font=("Arial", 20, "bold"),
-                bg="#4CAF50",
-                fg="white",
-                activebackground="#357a38",
-                activeforeground="white",
-                command=lambda: on_resume_click()
-            )
-            resume_btn.pack(pady=40)
-
-            # Function to handle Resume Working button click
-            def on_resume_click():
-                self.break_window.destroy()
-                self.is_break = False
-                self.current_session += 1
-                if self.current_session <= self.total_sessions:
-                    self.start_work_session()
-                else:
-                    # Play a long beep to indicate all sessions are complete
-                    try:
-                        import winsound
-                        winsound.Beep(1200, 700)  # 1200 Hz for 700 ms
-                    except Exception:
-                        pass
-                    print("Pomodoro sequence complete!")
 
 if __name__ == "__main__":
     root = tk.Tk()
