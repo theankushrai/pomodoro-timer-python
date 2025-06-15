@@ -31,6 +31,7 @@ class BreakManager:
         self.running = True
         self.end_time = time.time() + break_time
         self.password = "iamdesparatetowork"
+        self.timer_finished = False  # Track if timer has finished
         self.create_windows()
         self.update_timer()
     
@@ -135,7 +136,7 @@ class BreakManager:
                 )
                 resume_btn.pack(pady=40)
                 window.resume_btn = resume_btn
-                resume_btn.pack_forget()
+                resume_btn.pack_forget()  # Hide initially
             
             # Now make the window fullscreen and topmost
             window.attributes('-fullscreen', True)
@@ -176,9 +177,10 @@ class BreakManager:
             # Store the window
             self.windows.append(window)
             
-            # Handle window close
+            # Handle window close - prevent default closing
             def on_closing():
-                self.end_break()
+                # Don't allow window to be closed by clicking X
+                pass
                 
             window.protocol("WM_DELETE_WINDOW", on_closing)
             
@@ -195,37 +197,56 @@ class BreakManager:
             
         time_left = max(0, int(self.end_time - time.time()))
         
-        if time_left <= 0:
-            self.end_break()
-            return
-            
-        mins, secs = divmod(time_left, 60)
-        time_str = f"{mins:02d}:{secs:02d}"
-        
-        windows_to_remove = []
-        for window in self.windows:  # Don't use a slice to avoid modifying while iterating
-            try:
-                if window.winfo_exists():
-                    if hasattr(window, 'timer_label'):
-                        window.timer_label.config(text=f"Break time: {time_str}")
+        # When timer reaches zero, show resume button but DON'T auto-close
+        if time_left <= 0 and not self.timer_finished:
+            self.timer_finished = True
+            # Show the resume button when timer is finished
+            for window in self.windows:
+                try:
+                    if window.winfo_exists() and hasattr(window, 'resume_btn'):
+                        window.resume_btn.pack(pady=40)
+                        # Update timer text to show it's finished
+                        if hasattr(window, 'timer_label'):
+                            window.timer_label.config(
+                                text="Break time complete! Click Resume or enter password.",
+                                fg="#4CAF50"  # Green color to indicate completion
+                            )
                         window.update()
-                else:
+                except Exception as e:
+                    print(f"Error showing resume button: {e}")
+            
+            # Don't call self.end_break() here - let user decide when to end
+            # Just continue updating to keep the window alive
+        
+        # Update timer display if still counting down
+        if time_left > 0:
+            mins, secs = divmod(time_left, 60)
+            time_str = f"{mins:02d}:{secs:02d}"
+            
+            windows_to_remove = []
+            for window in self.windows:
+                try:
+                    if window.winfo_exists():
+                        if hasattr(window, 'timer_label'):
+                            window.timer_label.config(text=f"Break time: {time_str}")
+                            window.update()
+                    else:
+                        windows_to_remove.append(window)
+                except Exception as e:
+                    print(f"Error updating window: {e}")
                     windows_to_remove.append(window)
-            except Exception as e:
-                print(f"Error updating window: {e}")
-                windows_to_remove.append(window)
+            
+            # Remove any dead windows
+            for window in windows_to_remove:
+                if window in self.windows:
+                    self.windows.remove(window)
         
-        # Remove any dead windows
-        for window in windows_to_remove:
-            if window in self.windows:
-                self.windows.remove(window)
-        
-        # Schedule the next update if we still have windows
+        # Schedule the next update if we still have windows and timer is running
         if self.running and self.windows:
             self.windows[0].after(200, self.update_timer)
     
     def end_break(self):
-        """End the break and close all windows"""
+        """End the break and close all windows - only called by user action"""
         if not self.running:
             return
             
